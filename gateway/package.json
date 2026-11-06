@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "bun --watch src/main.ts",
     "start": "bun src/main.ts",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:live": "bun examples/live-request.ts",
+    "test:deepseek": "bun examples/live-request.ts deepseek"
   },
   "devDependencies": {
     "@types/bun": "latest",

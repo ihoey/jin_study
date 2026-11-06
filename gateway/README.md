@@ -2,6 +2,14 @@
 
 用 TypeScript + Bun 从零实现一个本地 LLM 网关(模型转换器),目标是对标 Magpie 的核心层:协议翻译 + 路由。
 
+学习入口:[百炼真实模型联调](docs/03-bailian-live.md)。使用 `.env` 中的百炼配置观察 `[1]` 到 `[5]`。`bun run typecheck` 检查类型,`bun test` 校验配置解析,`bun run test:live` 验证真实模型链路。
+
+代码讲解:[新增代码的执行顺序与设计原因](docs/04-new-code-walkthrough.md),包括配置选择、请求校验、思考开关、流程日志、错误处理和联调脚本的进入与退出条件。
+
+步骤 1 已完成:[真实模型验收与代理配置](docs/06-step1-real-models.md)。百炼、DeepSeek 的普通与流式请求均已真实通过;此前的连接重置通过显式使用本机系统代理解决。
+
+DeepSeek:[接入与执行顺序](docs/05-deepseek.md)。支持现有 `DEEPSEEK_KEY`、`DEEPSEEK_ID`,请求 `model: "deepseek"` 即可选择,`model: "qwen"` 继续选择百炼。真实联调命令为 `bun run test:deepseek`。
+
 ## 第一步:目的
 
 写代码之前,先把三件事写清楚:要解决什么问题、边界在哪、怎么算成功。
@@ -193,7 +201,7 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
 
 #### DeepSeek:供应商不同,仍可复用同一类协议适配器
 
-如果以后把配置和适配器解耦,可以形成这样的路由;这里的 `deepseek` Provider 尚未在当前代码中注册:
+目前已独立注册 `deepseek` Provider,复用兼容协议适配器,对应这样的路由:
 
 ```text
 客户端: POST /v1/chat/completions
@@ -211,9 +219,9 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
 
 因为它支持 OpenAI 兼容格式,可以复用通用的 Chat Completions 适配代码,再补 DeepSeek 特有字段。思考模式使用 `thinking` 和 `reasoning_effort` 等参数,回复中的 `reasoning_content` 与最终回答 `content` 是不同字段,完整适配需要分别处理它们。
 
-**当前骨架的实际情况:** `OpenAIProvider.id` 写死为 `openai`,启动代码也只注册这个 id。如果只把 `OPENAI_BASE_URL` 改成 `https://api.deepseek.com`,并把 `OPENAI_API_KEY` 设为 DeepSeek Key,现有代码发出的就是 DeepSeek 请求,但网关里的供应商标识仍叫 `openai`。因此此时客户端要使用裸模型名 `deepseek-flash` 或 `openai/deepseek-flash`,直接使用 `deepseek/deepseek-flash` 会找不到 Provider。
+**当前骨架的实际情况:** `OpenAIProvider` 的构造函数接收供应商 id。DeepSeek 使用独立地址和密钥注册,客户端可以使用 `deepseek` 别名或 `deepseek/deepseek-flash`。百炼仍使用自己的配置和 `qwen` 别名。
 
-这说明“能用某种协议调用”与“供应商命名和注册已经完善”是两件事。现有转换还会丢掉 `thinking`、`reasoning_effort` 和 `reasoning_content` 等字段,所以只能借此理解文本调用路径,尚未完整支持 DeepSeek 的思考及工具调用语义。其思考模式默认开启,当前代码不转发关闭开关,也不向客户端返回思考内容。
+当前入口的 `enable_thinking` 会先转成内部开关,再映射为 DeepSeek 的 `thinking.type`。完整的 reasoning 输出、思考强度和工具调用语义仍待后续实现。
 
 来源:[DeepSeek 兼容 API 与地址](https://api-docs.deepseek.com/)、[DeepSeek 思考模式字段](https://api-docs.deepseek.com/guides/thinking_mode/)。
 
@@ -233,7 +241,7 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
 
 如果说的是“用我已有的 ChatGPT 订阅账号”,则需要真实网关支持的订阅账号通道,例如 Magpie 文档中的 Codex 登录账号。那部分包含账号读取或登录、刷新和账号调度,不是把 `OPENAI_API_KEY` 换成订阅名称就能实现。API 凭据、API 模型目录和订阅登录应分开理解;部分订阅可以领取并关联 API 额度,仍需按 API 通道完成配置。
 
-本节补充的是模型来源、协议与接入方式的说明。当前项目仍使用 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 这组配置,尚未实现独立 DeepSeek Provider 注册或 ChatGPT 订阅账号登录。
+本节补充的是模型来源、协议与接入方式的说明。当前项目已读取百炼与 DeepSeek 的独立配置,尚未实现 ChatGPT 订阅账号登录。
 
 来源:[OpenAI Chat Latest 模型说明](https://developers.openai.com/api/docs/models/chat-latest)、[ChatGPT 订阅的 API 额度说明](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)、[Magpie 账号通道说明](https://github.com/yetone/magpie/blob/main/docs/subsystems/providers-accounts.md)。
 
@@ -295,7 +303,7 @@ interface Provider {
 
 ### 8. 这份骨架距离真实网关还有什么
 
-当前已实现 OpenAI Chat Completions 的文本请求和响应转换。虽然 `types.ts` 已定义图片、工具和 thinking 等类型,这些定义本身不代表端到端已经支持;当前非字符串消息内容还会在入口被替换为空数组,上游解析也主要读取文本。
+当前已实现 OpenAI Chat Completions 的文本请求和响应转换,百炼与 DeepSeek 的普通、流式真实请求均已通过。虽然 `types.ts` 已定义图片、工具和 thinking 等类型,这些定义本身不代表端到端已经支持;入口会拒绝图片和工具请求,上游解析主要读取文本。
 
 后续可按顺序补齐:完整的消息与工具转换 → 第二种上游协议 → 第二种客户端入口 → 参数和错误处理 → 超时与取消 → 账号、重试与故障转移 → 用量与可观测性。
 
@@ -314,7 +322,7 @@ curl -fsSL https://bun.sh/install | bash
 ```sh
 cd gateway
 bun install
-OPENAI_API_KEY=sk-... bun run dev
+bun run dev
 ```
 
 测试:
@@ -324,7 +332,7 @@ curl http://127.0.0.1:3425/v1/models
 
 curl -N http://127.0.0.1:3425/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"qwen","stream":true,"enable_thinking":false,"messages":[{"role":"user","content":"你好"}]}'
 ```
 
 ## 路线图
@@ -332,7 +340,7 @@ curl -N http://127.0.0.1:3425/v1/chat/completions \
 | 步骤 | 内容 | 状态 |
 |---|---|---|
 | 1 | 目的 | ✅ 本文件 |
-| 2 | 骨架 + OpenAI 直通 | ✅ |
+| 2 | 骨架 + 文本调用链路 | 已通过百炼与 DeepSeek 的真实普通/流式验收 |
 | 3 | Provider 接口 + 路由 + 模型别名 | ✅ 骨架,别名表待填 |
 | 4 | Anthropic 格式转换 | ⬜ |
 | 5 | Gemini 格式转换 | ⬜ |
