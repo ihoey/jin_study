@@ -53,7 +53,7 @@ const server = Bun.serve({ // 启动一个 HTTP 服务器,开始"接电话"。
   async fetch(req) { // 每个进来的 HTTP 请求都会走这个函数(req 是请求对象)。
     const url = new URL(req.url); // 把请求的网址解析成结构,方便读取路径 pathname。
 
-    if (req.method === "GET" && url.pathname === "/v1/models") { // 如果客户用 GET 问"有哪些模型"。
+    if (req.method === "GET" && url.pathname === "/v1/models") { // 如果客户用 GET 获取模型列表。
       const models = await router.listModels(); // 汇总所有供应商提供的模型清单。
       return Response.json({ // 把清单包装成 JSON 返回给客户。
         object: "list", // OpenAI 规范里这个字段固定为 "list"。
@@ -61,17 +61,31 @@ const server = Bun.serve({ // 启动一个 HTTP 服务器,开始"接电话"。
       });
     }
 
-    if (req.method === "POST" && url.pathname === "/v1/chat/completions") { // 如果客户用 POST 说"帮我聊天"。
+    if (req.method === "POST" && url.pathname === "/v1/chat/completions") { // 处理聊天请求
       const raw = (await req.json()) as Record<string, any>; // 读请求体里的 JSON,当成一个任意字段的对象。
       const requestedModel = String(raw.model ?? ""); // 取出客户要的模型名,没写就默认空字符串。
-      console.log("[请求] requestedModel =", requestedModel); // 打印客户要的模型名,便于观察。
+      // 打印客户要的模型名,便于观察。 requestedModel = openai/gpt-4o-mini
 
-      // [2] 模型名 -> provider + 上游模型名
+      // [2] 下面这句话是在问：“openai/gpt-4o-mini 应该找哪个供应商？发给供应商的模型名是什么？”
       const { provider, upstreamModel } = router.resolve(requestedModel); // 查通讯录,得到"哪家供应商 + 真实模型名"。
-      console.log("[路由] provider =", provider.constructor.name, "upstreamModel =", upstreamModel); // 打印查通讯录的结果,看路由解析对不对。
+      // 打印查通讯录的结果,看路由解析对不对。[路由] provider = OpenAIProvider upstreamModel = gpt-4o-mini
 
-      // [3] OpenAI JSON -> 统一中间格式
-      const chatReq = fromOpenAI(raw, upstreamModel); // 把客户的话翻译成内部统一格式(统一请求对象)。
+
+      // [3] 把客户的话翻译成内部统一格式(统一请求对象)
+      const chatReq = fromOpenAI(raw, upstreamModel); 
+      /**
+      [转换] chatReq = {
+        "model": "gpt-4o-mini",
+        "stream": true,
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ]
+      } 
+      */
+      // console.log("[转换] chatReq =", JSON.stringify(chatReq, null, 2)); // 完整打印转换后的请求,方便观察字段。
 
       // [4] 关键:chat() 返回的是"惰性"异步生成器,此刻还没发任何网络请求。
       //     真正的上游调用发生在下面 [5] 开始 for-await 消费 events 的时候。
@@ -88,6 +102,18 @@ const server = Bun.serve({ // 启动一个 HTTP 服务器,开始"接电话"。
         });
       }
       // [5] 非流式:把所有 events 聚合成一个 OpenAI JSON 响应
+      /**toOpenAIJSON =>return {
+          model,
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: text
+            },
+            finish_reason: finishReason
+          }],
+          usage
+        }; */
       return Response.json(await toOpenAIJSON(events, requestedModel)); // 等供应商全部说完,合成一整句再一次性返回。
     }
 
@@ -96,3 +122,5 @@ const server = Bun.serve({ // 启动一个 HTTP 服务器,开始"接电话"。
 });
 
 console.log(`gateway listening on http://127.0.0.1:${server.port}`); // 启动成功后打印一行日志,告诉你在哪能访问。
+
+
