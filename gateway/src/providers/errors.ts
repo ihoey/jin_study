@@ -11,7 +11,10 @@ export class UpstreamError extends Error {
     this.name = "UpstreamError";
   }
 
-  get status(): number { return this.code === "timeout_error" ? 504 : 502; }
+  get status(): number {
+    if (this.code === "unsupported_parameter_error") return 400;
+    return this.code === "timeout_error" ? 504 : 502;
+  }
 
   toJSON() {
     return { error: { type: this.code, message: this.message, provider: this.provider,

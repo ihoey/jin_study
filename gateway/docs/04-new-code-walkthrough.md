@@ -11,11 +11,8 @@
 ```text
 调用 loadConfig()
   → 读取端口
-  → 判断 OPENAI_API_KEY 是否非空
-      → 是:使用 OPENAI_* 的密钥和地址
-      → 否:使用 DASHSCOPE_* 的密钥和地址
-  → 有密钥才添加一个 Provider 配置
-  → 独立读取 DeepSeek 密钥和模型 ID,有密钥才追加 deepseek 配置
+  → 分别读取 OPENAI_*、DASHSCOPE_*、DEEPSEEK_* 地址和密钥
+  → 有密钥才注册对应供应商,三家可以同时存在
   → 根据条件建立 qwen 与 deepseek 别名
   → return 配置对象,回到 main.ts
 ```
@@ -26,9 +23,9 @@
 
 **为什么删除地址末尾的 `/`?** Provider 后面会拼接 `/chat/completions`,提前移除末尾斜杠可以避免出现 `//chat/completions`。
 
-**为什么百炼也叫 `openai`?** 这是原有兼容协议实现的注册 id。地址决定真实连接的服务,这里的 id 不表示只能连接 OpenAI 官方地址。现在还可以独立注册 `deepseek`,两者复用同一个适配器类,各自保存地址、密钥和身份。
+**百炼现在叫什么?** 步骤 2 将它改为独立的 `bailian`,与 `openai`、`deepseek` 分别注册。三家按配置中的协议复用 `OpenAIChatProvider` 类,身份、地址和密钥各自独立。旧前缀兼容规则见 [步骤 2](07-step2-provider-protocol.md)。
 
-比如设置了百炼密钥和 `QWEN_MODEL=某个模型`,且没有优先选择 `OPENAI_*`,就建立 `qwen → openai/某个模型`。DeepSeek 配置则建立 `deepseek → deepseek/真实模型`。Router 先查别名,再拆出供应商和真实模型名;当前只为已注册的供应商创建别名。
+比如设置了百炼密钥和 `QWEN_MODEL=某个模型`,就建立 `qwen → bailian/某个模型`,不受是否配置 OpenAI 影响。DeepSeek 建立 `deepseek → deepseek/真实模型`。Router 先查模型别名,再拆出供应商和模型名,最后处理旧供应商前缀兼容。
 
 ## 2. 收到聊天请求:先检查订单,再找供应商
 
@@ -82,7 +79,7 @@ enable_thinking: false → enableThinking: false → enable_thinking: false
 
 因此判断写成 `value !== undefined`。如果写成 `if (value)`,表示关闭的 `false` 就会被过滤掉,上游可能继续使用自己的默认行为。
 
-`stream` 决定如何返回回答,`enableThinking` 是内部思考开关,二者互不替代。关闭思考也可以使用流式返回。出口按供应商 id 转换:DeepSeek 使用 `thinking.type`,原有百炼配置使用 `enable_thinking`。当前尚未实现完整的思考内容转换。
+`stream` 决定如何返回回答,`enableThinking` 是内部思考开关,二者互不替代。出口根据配置里的 `thinkingFormat` 转换,不依赖供应商 id。DeepSeek 默认使用 `thinking.type`,百炼默认使用 `enable_thinking`。当前尚未实现完整的思考内容转换。
 
 ## 4. 健康检查、流程日志和错误响应分别解决什么
 

@@ -8,6 +8,8 @@
 
 步骤 1 已完成:[真实模型验收与代理配置](docs/06-step1-real-models.md)。百炼、DeepSeek 的普通与流式请求均已真实通过;此前的连接重置通过显式使用本机系统代理解决。
 
+步骤 2 已完成:[供应商身份与协议分开](docs/07-step2-provider-protocol.md)。三家供应商独立注册,按协议选择适配器;`qwen`、`deepseek` 和旧百炼前缀保持兼容。
+
 DeepSeek:[接入与执行顺序](docs/05-deepseek.md)。支持现有 `DEEPSEEK_KEY`、`DEEPSEEK_ID`,请求 `model: "deepseek"` 即可选择,`model: "qwen"` 继续选择百炼。真实联调命令为 `bun run test:deepseek`。
 
 ## 第一步:目的
@@ -128,7 +130,7 @@ CC Switch 有两条需要分开理解的路径:
 | `provider.rs` | 保存 Provider 配置和元数据 | `config.ts` 的配置类型 |
 | `proxy/server.rs`、`proxy/handlers.rs` | 注册 HTTP 路由,接收和处理不同客户端协议的请求 | `main.ts` |
 | `proxy/handler_context.rs`、`proxy/provider_router.rs` | 请求上下文、供应商选择等 | `router.ts`,但当前功能更少 |
-| `proxy/forwarder.rs` | 组织上游请求和转发流程 | `OpenAIProvider.chat()` 中的上游调用 |
+| `proxy/forwarder.rs` | 组织上游请求和转发流程 | `OpenAIChatProvider.chat()` 中的上游调用 |
 | `proxy/providers/adapter.rs`、`transform*.rs` | 地址、认证和协议转换 | `providers/openai.ts` 与 `translate/` 的部分职责 |
 | `proxy/providers/streaming*.rs`、`proxy/response_processor.rs` | 流式转换、响应处理和用量等 | `stream()`、`sse.ts`、`toOpenai.ts` |
 
@@ -219,7 +221,7 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
 
 因为它支持 OpenAI 兼容格式,可以复用通用的 Chat Completions 适配代码,再补 DeepSeek 特有字段。思考模式使用 `thinking` 和 `reasoning_effort` 等参数,回复中的 `reasoning_content` 与最终回答 `content` 是不同字段,完整适配需要分别处理它们。
 
-**当前骨架的实际情况:** `OpenAIProvider` 的构造函数接收供应商 id。DeepSeek 使用独立地址和密钥注册,客户端可以使用 `deepseek` 别名或 `deepseek/deepseek-flash`。百炼仍使用自己的配置和 `qwen` 别名。
+**当前骨架的实际情况:** `OpenAIChatProvider` 的构造函数接收供应商 id。DeepSeek 使用独立地址和密钥注册,客户端可以使用 `deepseek` 别名或 `deepseek/deepseek-flash`。百炼仍使用自己的配置和 `qwen` 别名。
 
 当前入口的 `enable_thinking` 会先转成内部开关,再映射为 DeepSeek 的 `thinking.type`。完整的 reasoning 输出、思考强度和工具调用语义仍待后续实现。
 
@@ -231,7 +233,7 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
 
 ```text
 客户端 model = "openai/chat-latest"
-    → 路由得到 OpenAIProvider,upstreamModel = "chat-latest"
+    → 路由得到 OpenAIChatProvider,upstreamModel = "chat-latest"
     → 使用 OPENAI_API_KEY 请求 OpenAI 的 /v1/chat/completions
     → 上游响应转成内部 StreamEvent
     → 返回 Chat Completions 格式,响应 model 保留 "openai/chat-latest"
@@ -254,7 +256,7 @@ Magpie 的网关支持上述多种入口,为每次调用确定供应商、模型
    requestedModel = "openai/gpt-4o-mini"             客户端原始名称
 
 ② router.resolve(requestedModel)
-   provider = 一个 OpenAIProvider 对象              负责上游通信的实现
+   provider = 一个 OpenAIChatProvider 对象              负责上游通信的实现
    upstreamModel = "gpt-4o-mini"                    发给上游的真实名称
 
 ③ fromOpenAI(raw, upstreamModel)
@@ -299,7 +301,7 @@ interface Provider {
 }
 ```
 
-所以 `provider` 不是一个模型名,也不是 API Key,而是能调用供应商的对象。`provider.constructor.name` 只打印它的类名 `OpenAIProvider`,不会展示这个对象的全部字段。
+所以 `provider` 不是一个模型名,也不是 API Key,而是能调用供应商的对象。`provider.constructor.name` 只打印它的类名 `OpenAIChatProvider`,不会展示这个对象的全部字段。
 
 ### 8. 这份骨架距离真实网关还有什么
 

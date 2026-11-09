@@ -24,10 +24,8 @@
 
 // 引入"读配置"的函数(从 ./config 文件里拿 loadConfig)。
 import { loadConfig } from "./config"; // 启动时调用配置读取函数,随后建立供应商和路由。
-// 引入"供应商"这个类型(只用于标注类型,运行时不存在)。
-import type { Provider } from "./providers/base"; // 只导入类型,让供应商 Map 检查对象是否满足统一接口。
-// 引入具体的一家供应商实现:OpenAI。
-import { OpenAIProvider } from "./providers/openai"; // 导入已有的兼容协议实现;具体连接谁由配置中的 baseUrl 决定。
+// 引入启动装配函数,入口只负责组装,不指定某家供应商的具体类。
+import { createProviders } from "./providers/registry"; // 按配置中的协议创建各家适配器实例。
 import { UpstreamError } from "./providers/errors";
 // 引入路由类(负责把模型名翻译成"哪家供应商 + 真实模型名")。
 import { Router } from "./router"; // Router 根据客户端模型名查找供应商对象和上游模型名。
@@ -45,13 +43,8 @@ function trace(step: string, details?: Record<string, unknown>): void { // 把�
 const config = loadConfig(); // 程序一启动就读取一次配置(端口、密钥、模型映射等),像"上班先看排班表"。
 console.log("[启动] 配置:", { port: config.port, providers: config.providers.map((p) => p.id), defaultProvider: config.defaultProvider }); // 打印启动配置,方便确认端口和供应商是否读对。
 
-const providers = new Map<string, Provider>(); // 建一个空的供应商名册,键是供应商 id,值是对应的供应商对象。
-for (const p of config.providers) { // 遍历配置里声明的每一个供应商。
-  // 当前配置里的上游都使用 Chat Completions 兼容协议,各自保留 id、地址和密钥。
-  providers.set(p.id, new OpenAIProvider(p.baseUrl, p.apiKey, p.id, config.proxyUrl));
-} // 所有供应商对象创建完成,继续建立 Router;构造对象的过程还没有请求上游。
-
-const router = new Router(providers, config.modelMap, config.defaultProvider); // 用"名册 + 模型别名表 + 默认供应商"建好通讯录。
+const providers = createProviders(config); // [启动 2] 配置 -> 独立适配器实例,此时不会请求上游。
+const router = new Router(providers, config.modelMap, config.defaultProvider, config.providerAliases);
 
 const server = Bun.serve({ // 启动一个 HTTP 服务器,开始"接电话"。
   hostname: "127.0.0.1", // 本地学习网关只监听本机。

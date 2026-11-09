@@ -13,15 +13,18 @@ export class Router { // 路由表,类比"前台通讯录"。
     private readonly providers: ReadonlyMap<string, Provider>, // ①供应商名册(id -> 供应商对象),只读。
     private readonly modelMap: Readonly<Record<string, string>>, // ②别名表(客户叫法 -> 真实叫法),只读。
     private readonly defaultProvider: string, // ③默认供应商:客户没指定时找谁。
+    private readonly providerAliases: Readonly<Record<string, string>> = {}, // ④旧前缀兼容表,模型别名仍然优先。
   ) {} // 函数体为空,只负责把上面的参数存成字段。
 
   resolve(model: string): ResolvedRoute { // 核心方法:把"客户要的名字"翻译成"名片"。
-    const mapped = this.modelMap[model] ?? model; // 先查别名表;查不到就用原名(?? 表示"左边没有值就用右边")。
+    const mapped = Object.hasOwn(this.modelMap, model) ? this.modelMap[model]! : model;
 
     // "provider/model" 或 "provider/model-version" 形式。
     const slash = mapped.indexOf("/"); // 看名字里有没有斜杠,并拿到斜杠的位置(没有则返回 -1)。
     if (slash > 0) { // 有斜杠且不在开头,说明客户点名了供应商。
-      const providerId = mapped.slice(0, slash); // 斜杠前面的部分就是供应商 id。
+      const requestedId = mapped.slice(0, slash);
+      const providerId = Object.hasOwn(this.providerAliases, requestedId)
+        ? this.providerAliases[requestedId]! : requestedId;
       const provider = this.providers.get(providerId); // 去名册里找这家供应商。
       if (!provider) throw new Error(`unknown provider "${providerId}" for model "${model}"`); // 找不到就报错,像打给不存在的部门。
       return { provider, upstreamModel: mapped.slice(slash + 1) }; // 返回名片:供应商 + 斜杠后面的真实模型名。

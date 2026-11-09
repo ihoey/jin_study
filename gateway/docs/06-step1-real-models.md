@@ -33,7 +33,7 @@ GATEWAY_PROXY_URL=http://127.0.0.1:7897
 .env 的 GATEWAY_PROXY_URL
   -> config.ts:检查代理地址格式
   -> main.ts:将代理传给各个 Provider
-  -> OpenAIProvider.request():显式代理 + 认证 + 45 秒请求期限
+  -> OpenAIChatProvider.request():显式代理 + 认证 + 45 秒请求期限
   -> 百炼或 DeepSeek
   -> 正常响应进入原有 JSON / SSE 转换
      失败则进入 UpstreamError 分类

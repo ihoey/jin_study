@@ -12,12 +12,12 @@
 
 如果两套命名同时存在,非空的 `DEEPSEEK_KEY`、`DEEPSEEK_ID` 优先。
 
-`loadConfig()` 仍按原规则选择 OpenAI 或百炼作为 `openai` 配置项,然后单独追加 `deepseek` 配置项。两家分别保存自己的地址与密钥。没有密钥时不注册该上游,有密钥和模型 ID 时才创建别名。
+`loadConfig()` 分别注册 `openai`、`bailian`、`deepseek`,各自保存地址与密钥。没有密钥时不注册该上游,有密钥和模型 ID 时才创建别名。注册流程见 [步骤 2](07-step2-provider-protocol.md)。
 
 现在你这份配置对应的路由为:
 
 ```text
-model="qwen"     -> openai 实例   -> 百炼 / QWEN_MODEL
+model="qwen"     -> bailian 实例  -> 百炼 / QWEN_MODEL
 model="deepseek" -> deepseek 实例 -> DeepSeek / DEEPSEEK_ID
 ```
 
@@ -26,8 +26,8 @@ model="deepseek" -> deepseek 实例 -> DeepSeek / DEEPSEEK_ID
 ## 2. 按执行顺序看改动
 
 1. `src/config.ts`:独立读取 DeepSeek 配置,注册上游,创建 `deepseek` 别名。
-2. `src/main.ts`:遍历所有配置,为每个上游创建一个 `OpenAIProvider` 实例。
-3. `src/providers/openai.ts`:构造函数接收上游 `id`,让同一协议实现拥有不同身份。
+2. `src/main.ts`:通过工厂按协议创建各家独立实例。
+3. `src/providers/openai.ts`:构造函数接收供应商配置,让同一协议实现拥有不同身份与参数格式。
 4. `src/router.ts`:原有路由无需改动,将 `deepseek` 拆解为供应商与真实模型名。
 5. `toOpenAIBody()`:把内部思考开关转换成当前上游要求的字段。
 

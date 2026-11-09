@@ -5,6 +5,7 @@ import type { ChatRequest, Message, ModelInfo, StreamEvent, TextPart, Usage } fr
 import type { Provider } from "./base"; // 引入供应商接口,约定每家供应商都要提供哪些能力。
 import { readSSE } from "../translate/sse"; // 引入 SSE 解析函数,把 HTTP 响应的字节流拆成一条条事件的数据字符串。
 import { UpstreamError } from "./errors";
+import type { ProviderConfig } from "../config";
 
 interface OpenAIChunk { // 描述 OpenAI 单个流式响应片段的结构,这里只列出本实现会读取的字段。
   choices?: Array<{ // choices 是可选的候选回复数组;问号表示这个字段可能不存在。
@@ -22,22 +23,19 @@ interface OpenAICompletion { // 描述 OpenAI 非流式响应的结构:一次返
   usage?: { prompt_tokens?: number; completion_tokens?: number }; // 可选的输入和输出 token 用量,之后会转换成内部命名。
 } // 结束非流式响应类型定义。
 
-export class OpenAIProvider implements Provider { // 导出 OpenAI 供应商类;implements 要求这个类满足 Provider 接口。
-
-  constructor( // 创建供应商对象时接收上游 API 地址和密钥;这里只保存配置,不会发送请求。
-    private readonly baseUrl: string, // 自动创建并保存私有只读属性 baseUrl,例如 https://api.openai.com/v1。
-    private readonly apiKey: string, // 自动创建并保存私有只读属性 apiKey,发送请求时用它进行身份认证。
-    readonly id: string = "openai", // 同一类协议的不同实例,分别保留自己的供应商标识。
-    private readonly proxyUrl?: string, // 从配置显式传入,无需依赖终端自动使用 macOS 系统代理。
-  ) {} // 构造函数没有额外逻辑;参数属性已经完成配置保存。
+export class OpenAIChatProvider implements Provider {
+  readonly protocol = "openai-chat-completions";
+  // 接收完整配置,同一类可以创建任意 id 的兼容服务实例。
+  constructor(private readonly config: ProviderConfig, private readonly proxyUrl?: string) {}
+  get id(): string { return this.config.id; }
 
   // [4a] 网络入口集中在这里:显式代理、连接期限、认证和 HTTP 错误统一处理。
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
-    headers.set("authorization", `Bearer ${this.apiKey}`);
+    headers.set("authorization", `Bearer ${this.config.apiKey}`);
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
+      response = await fetch(`${this.config.baseUrl}${path}`, {
         ...init, headers, proxy: this.proxyUrl, signal: AbortSignal.timeout(45_000),
       });
     } catch (error) { throw UpstreamError.connection(this.id, error); }
@@ -66,7 +64,7 @@ export class OpenAIProvider implements Provider { // 导出 OpenAI 供应商类;
   } // 结束模型列表方法。
 
   async *chat(req: ChatRequest): AsyncGenerator<StreamEvent, void, void> { // 异步生成器:逐个产出 StreamEvent,没有最终返回值,也不接收 next() 传入值;被消费时才开始执行。
-    const body = toOpenAIBody(req, this.id); // 基础协议相同,厂商扩展字段按当前供应商转换。
+    const body = toOpenAIBody(req, this.config); // 参数格式取自配置,不通过 id 猜测厂商。
     // canonical -> OpenAI 请求体,然后发上游。
     const res = await this.request("/chat/completions", {
       method: "POST", // 使用 POST 提交聊天请求。
@@ -131,7 +129,7 @@ function mapFinishReason(r: string | null | undefined): "stop" | "length" | "too
   return "stop"; // 其余原因以及 null、undefined 都统一归为 stop,这是当前实现的默认映射。
 } // 结束结束原因映射函数。
 
-export function toOpenAIBody(req: ChatRequest, providerId = "openai"): Record<string, unknown> {
+export function toOpenAIBody(req: ChatRequest, config: Pick<ProviderConfig, "id" | "thinkingFormat">): Record<string, unknown> {
   const body: Record<string, unknown> = { // 创建请求对象,先填入模型、消息和是否流式这三个基础字段。
     model: req.model, // 使用路由层确定的上游模型名,例如去掉供应商前缀后的 gpt-4o-mini。
     messages: req.messages.map(toOpenAIMessage), // 逐条转换内部消息,生成 OpenAI 接口所需的 messages 数组。
@@ -143,8 +141,11 @@ export function toOpenAIBody(req: ChatRequest, providerId = "openai"): Record<st
   if (req.maxTokens != null) body.max_tokens = req.maxTokens; // 同样保留已提供的生成 token 上限,并把 maxTokens 改名为 max_tokens。
   // 同一个内部开关对应不同上游字段,避免把百炼字段原样发给 DeepSeek。
   if (req.enableThinking !== undefined) {
-    if (providerId === "deepseek") body.thinking = { type: req.enableThinking ? "enabled" : "disabled" };
-    else body.enable_thinking = req.enableThinking;
+    switch (config.thinkingFormat) {
+      case "thinking": body.thinking = { type: req.enableThinking ? "enabled" : "disabled" }; break;
+      case "enable_thinking": body.enable_thinking = req.enableThinking; break;
+      case "unsupported": throw new UpstreamError(config.id, "unsupported_parameter_error", "该供应商未配置思考开关格式,请省略 enable_thinking。");
+    }
   }
   return body; // 返回准备好的 JavaScript 对象,交给 chat() 序列化后发送。
 } // 结束请求体转换函数。

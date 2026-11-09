@@ -7,12 +7,12 @@ live-request.ts 或 curl（客户端）
   -> main.ts（本地网关）
   -> router.ts: qwen 别名解析为 .env 中的 QWEN_MODEL
   -> fromOpenAI(): 校验后的请求转换为 ChatRequest
-  -> OpenAIProvider.chat(): 调用百炼的兼容接口
+  -> OpenAIChatProvider.chat(): 调用百炼的兼容接口
   -> toOpenAIJSON() / toOpenAIStream()
   -> 客户端
 ```
 
-这里的 `OpenAIProvider` 是已有的 OpenAI 兼容协议实现,上游地址指向百炼时,实际调用百炼。
+这里的 `OpenAIChatProvider` 是已有的 OpenAI 兼容协议实现,上游地址指向百炼时,实际调用百炼。
 
 ## 配置与运行
 
@@ -22,7 +22,7 @@ live-request.ts 或 curl（客户端）
 - `DASHSCOPE_BASE_URL`:百炼兼容接口的基础地址。
 - `QWEN_MODEL`:实际模型名。
 
-如果同时配置了非空 `OPENAI_API_KEY`,当前代码优先使用 `OPENAI_*` 地址与凭据,不会启用 `qwen` 别名。两套配置的地址和密钥成对选取。
+百炼使用独立的 `bailian` 身份。即使同时配置 `OPENAI_API_KEY`,两家也会分别注册,`qwen` 别名始终指向百炼。地址和密钥按各自变量成对读取。
 
 DeepSeek 在这两套配置之外独立注册,不会替换百炼配置。接入步骤见 [DeepSeek 说明](05-deepseek.md)。
 
